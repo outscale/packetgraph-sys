@@ -1,0 +1,13 @@
+[package]
+name = "packetgraph-sys"
+version = "0.1.0"
+authors = ["Jerome Jutteau <jerome.jutteau@outscale.com>"]
+build = "build.rs"
+
+[build-dependencies]
+bindgen = "0.22.1"
+
+[dev-dependencies]
+libc = "*"
+
+[dependencies]
