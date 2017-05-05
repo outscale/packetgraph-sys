@@ -27,43 +27,64 @@ mod tests {
     extern crate libc;
 
     use super::*;
-    use self::libc::{c_char, c_int};
     use std::ffi::CString;
     use std::ptr;
+    use std::thread::sleep;
+    use std::time::Duration;
 
     #[test]
     fn sanity_check() {
-        let errp: *const pg_error = ptr::null();
-        let errp = errp as *mut *mut pg_error;
-
-        let mut args = std::env::args()
-            .map(|arg| CString::new(arg).unwrap())
-            .collect::<Vec<CString>>();
-
-        args.push(CString::new("-c1").unwrap());
-        args.push(CString::new("-n1").unwrap());
-        args.push(CString::new("--no-huge").unwrap());
-        args.push(CString::new("--no-shconf").unwrap());
-
-        let c_args = args.iter()
-            .map(|arg| arg.as_ptr())
-            .collect::<Vec<*const c_char>>();
-
         unsafe {
-            let ret = pg_start(c_args.len() as c_int,
-                               c_args.as_ptr() as *mut *mut c_char,
-                               errp);
-            assert!(errp.is_null());
-            assert_eq!(ret, 4);
-        }
+            let mut errp: *mut pg_error = ptr::null_mut();
+            let args = CString::new("-c1 -n1 --no-huge --no-shconf --lcores 0,1 -l 0,1").unwrap();
+            let ret = pg_start_str(args.as_ptr());
+            assert_eq!(ret,8);
 
-        // simple nop creation / destruction
-        let name = CString::new("nop").unwrap();
-        unsafe {
-            let nop = pg_nop_new(name.as_ptr(), errp);
-            assert!(errp.is_null());
+            let name = CString::new("nop").unwrap();
+            let nop = pg_nop_new(name.as_ptr(), &mut errp);
+            assert!(!pg_error_is_set(&mut errp));
             assert!(!nop.is_null());
-            pg_brick_destroy(nop);
+            
+            let name = CString::new("fw").unwrap();
+            let fw = pg_firewall_new(name.as_ptr(), 0, &mut errp);
+            assert!(errp.is_null());
+            assert!(!fw.is_null());
+
+            let tmp = CString::new("/tmp").unwrap();
+            pg_vhost_start(tmp.as_ptr(), &mut errp);
+            assert!(errp.is_null());
+
+            let name = CString::new("vhost").unwrap();
+            let vhost = pg_vhost_new(name.as_ptr(),
+                                     PG_VHOST_USER_DEQUEUE_ZERO_COPY as u64,
+                                     &mut errp);
+            assert!(errp.is_null());
+            assert!(!vhost.is_null());
+
+            pg_brick_link(nop, fw, &mut errp);
+            assert!(!pg_error_is_set(&mut errp));
+            pg_brick_link(fw, vhost, &mut errp);
+            assert!(!pg_error_is_set(&mut errp));
+
+            let name = CString::new("graph").unwrap();
+            let graph = pg_graph_new(name.as_ptr(), nop, &mut errp);
+            assert!(!pg_error_is_set(&mut errp));
+            pg_graph_poll(graph, &mut errp);
+            assert!(!pg_error_is_set(&mut errp));
+
+            let thread = pg_thread_init(&mut errp);
+            assert!(thread >= 0);
+            assert!(!pg_error_is_set(&mut errp));
+            pg_thread_add_graph(thread, graph);
+            pg_thread_run(thread);
+            sleep(Duration::from_secs(5));
+            assert!(pg_thread_state(thread) == pg_thread_state::PG_THREAD_RUNNING);
+
+            pg_thread_stop(thread);
+            sleep(Duration::from_millis(100));
+            assert!(pg_thread_state(thread) == pg_thread_state::PG_THREAD_STOPPED);
+            pg_thread_destroy(thread);
+            pg_graph_destroy(graph);
             pg_stop();
         }
     }
