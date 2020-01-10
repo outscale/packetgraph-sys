@@ -8,6 +8,10 @@ First, you need to [install packetgraph](https://github.com/outscale/packetgraph
 
 You can launch `cargo test` to run a sanity check.
 
+## Contributions
+
+No contribution is accepted at the moment on the project
+
 ## License
 
 ```
